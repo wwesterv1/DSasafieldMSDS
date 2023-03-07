@@ -1,0 +1,149 @@
+---
+title: "DS as a Field - Final Covid Dataset Analysis"
+author: "Wes Westervelt"
+date: "2023-03-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Libraries and Data
+
+```{r}
+library(tidyverse)
+library(lubridate)
+#load data# deaths and confirmed cases
+covid_UScon <- read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv")
+covid_Gcon <- read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv")
+covid_USdeath <- read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv")
+covid_Gdeath <- read_csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv")
+```
+
+
+
+
+## Tidy Global Datasets for Table 1
+For global covid cases and deaths
+
+```{r}
+covid_Gcon <-covid_Gcon %>%
+	pivot_longer(cols= -c('Province/State',
+				'Country/Region', Lat, Long),
+				names_to = "date",
+				values_to ="cases") %>%
+	select(-c(Lat, Long))
+
+
+
+
+covid_Gdeath <-covid_Gdeath %>%
+	pivot_longer(cols= -c('Province/State',
+				'Country/Region', Lat, Long),
+				names_to = "date",
+				values_to ="deaths") %>%
+	select(-c(Lat, Long))
+#join
+global <- covid_Gcon %>%
+	full_join(covid_Gdeath) %>%
+	rename(Country_Region = 'Country/Region',
+		Province_State = 'Province/State') %>%
+	mutate(date = mdy(date))
+```
+
+## Final Summary check before filtering
+```{r}
+summary(global)
+```
+
+## Final cleanup
+Filtering out 0 value cases and data set to the year 2022. Additionally pivot using group by to get sum of cases and deaths by month and year
+```{r}
+#filter out 0 cases
+global <- global %>% filter(cases >0)
+global <- global %>%filter(year(date) == 2022)
+global$monthyear <- format(ymd(global$date), "%b %Y")
+
+pivot <- global %>%
+    group_by(monthyear) %>%
+    summarise(cases = sum(cases),
+		deaths = sum(deaths))
+```		
+		
+		
+## Visual 1 - Time series for 2022, deaths and cases
+First graph is cases (blue), second is deaths (red)
+```{r}
+#plot for cases 
+ggplot(data=pivot, aes(x=monthyear, y=cases, group=1 )) +
+    geom_line(color="blue")+
+    geom_point(color="blue")+
+    theme(axis.text.x = element_text(angle = 90, vjust=0,  hjust =1 ))
+#plot for deaths
+ggplot(data=pivot, aes(x=monthyear, y=deaths, group=1 )) +
+    geom_line(aes(y = deaths), color="red")+
+    geom_point(aes(y= deaths), color="red")+
+    theme(axis.text.x = element_text(angle = 90, vjust=0,  hjust =1 ))
+```
+
+
+## Tidy US Deaths Dataset for Table 2
+```{r}
+#ds2 deaths by state
+covid_USdeath <-covid_USdeath %>%
+	pivot_longer(cols= -c(UID:Population),
+				names_to = "date",
+				values_to ="deaths") %>%
+	select(Admin2:deaths) %>%
+	mutate(date=mdy(date))%>%
+	select(-c(Lat,Long_))
+
+
+covid_USdeath <- covid_USdeath %>%filter(year(date) == 2023)
+covid_USdeath <- covid_USdeath %>%filter(month(date) == 03)
+covid_USdeath$monthyear <- format(ymd(covid_USdeath$date), "%b %Y")
+
+
+pivot2 <- covid_USdeath %>%
+    group_by(Province_State, monthyear) %>%
+    summarise(deaths = sum(deaths))
+```
+
+## Visual 2 - Bar graph of deaths by state so far this month (Mar 2023)
+
+```{r}
+ggplot(pivot2, aes(x = Province_State, y = deaths, fill= Province_State)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    labs(x = "monthyear", y = "deaths") +
+    facet_wrap(~ monthyear) +	
+    theme(axis.text.x = element_text(angle = 90, vjust=0,  hjust =1 ))
+```
+
+## Analysis
+
+For the first and second visual I went with a time lapse of cases and deaths in two separate charts over the last year. Blue is for cases, Red is for deaths. As you can see from the charts they both follow a similar shape, leading me to believe there's a linear relationship that could be modeled. An interesting note is that there was a decline in both around February of last year. This is most likely from two things. The first being the introduction of another varient. This can cause fear and resulting people to isolate and prevent the spread of the virus, thus causing less deaths. Secondly would have to do with weather, it seems that during colder months, people spend more time alone inside versus going to to see friends or family. I believe this also had an effect on the reduction of both cases and deaths. Additionally, when testing, I had the two charts overlapping to see if there was a point where they would meet, however I did not see that in the visual, as the number of cases greatly outnumbers the total deaths. 
+
+For the final visual I went for a bar graph to get a better picture of how each state is doing in terms of recent deaths in the US. From the graph we can see that California, Texas, Georgia and New York have the highest amount of total deaths in last month, with California being the highest. These are considered highly populous states, so it's understandable that the likelyhood of infection and then death are more likely. 
+
+
+## Model
+Predicts Number of deaths, given number of cases
+
+```{r}
+model <- lm(deaths ~ cases, data = global)
+
+pred <- predict(model)
+
+global$predicted <- pred
+
+ggplot(data.frame(actual_X = global$cases, actual_Y =  global$deaths, predicted = pred),
+    aes(x = cases, y = deaths))+
+    geom_point(aes(x =actual_X, y = actual_Y), color = "blue") +
+    geom_point(aes(x =actual_X, y=pred), color ="red")
+```
+
+The model for predicting global deaths based on the number of global cases appears to be linear in fashion. Generally speaking, given a number of cases, one can predict the expected number of deaths 
+
+## Bias
+Overall, I would say my analysis does not have an inherent bias, as I included all countries and states into my two analysis. I did this intentionally so there would be less likely to focus on one area and then mistakenly conclude that it represents the entire population. The only bias I could conceive would be if one population is reporting more than another, which would skew the datasets.
