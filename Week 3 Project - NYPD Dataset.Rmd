@@ -1,0 +1,146 @@
+---
+title: "Week 3 Project - NYPD Dataset"
+author: "Wes Westervelt"
+date: "2023-02-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import Libraries and Data
+
+```{r}
+
+library(tidyverse)
+library(lubridate)
+#data
+nypd_df <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+
+## Initial Summary and Glimpse
+Quick view to look for NA values and get an idea of the dataset
+
+```{r}
+summary(nypd_df)
+glimpse(nypd_df)
+```
+
+
+## Tidy Dataset
+Fill NA values with respective in each column:
+* Age Group - "U"
+* Gender - "UNKNOWN"
+* Race - "UNKNOWN"
+* locaation - "NONE"
+It made sense to keep values, as the incidents still happened, just data wasn't filled in that it wasn't collected (as unknown etc.)
+
+```{r}
+nypd_tidy <- nypd_df %>%
+    mutate( PERP_AGE_GROUP = if_else(is.na(PERP_AGE_GROUP), "U", PERP_AGE_GROUP), 
+PERP_SEX = if_else(is.na(PERP_SEX), "UNKNOWN", PERP_SEX), 
+PERP_RACE = if_else(is.na(PERP_RACE), "UNKNOWN", PERP_RACE), 
+LOCATION_DESC = if_else(is.na(LOCATION_DESC), "NONE", LOCATION_DESC))
+
+nypd_tidy <- select(nypd_df, INCIDENT_KEY, OCCUR_DATE, BORO,
+LOCATION_DESC, STATISTICAL_MURDER_FLAG, PERP_AGE_GROUP, PERP_SEX,
+PERP_RACE, VIC_AGE_GROUP, VIC_SEX, VIC_RACE, X_COORD_CD, Y_COORD_CD)
+```
+
+
+## Table 1
+Further breakdown of the tidy dataset in more usable format
+```{r}
+
+tabledate<-select(nypd_tidy, INCIDENT_KEY, OCCUR_DATE)
+
+#split string
+tabledate<- separate(tabledate, col=OCCUR_DATE, into=c('day', 'month', 'year'), sep='/')
+
+
+#GROUPBY
+ tabledate<-tabledate %>% 
+     group_by(year) %>% 
+     summarise(incident_count = n_distinct(INCIDENT_KEY))
+```
+
+
+## Visual 1 - Time series of incident count line graph
+Line graph to see incidents over time
+```{r}
+ggplot(data=tabledate, aes(x=year, y=incident_count, group=1)) +
+    geom_line(color="red")+
+    geom_point(color="red")
+```
+
+
+## Table 2
+Second further breakdown of the tidy dataset
+```{r}
+pivotw <- nypd_tidy %>%
+  group_by(VIC_RACE, VIC_SEX, VIC_AGE_GROUP) %>%
+  summarise(count = n()) %>%
+  pivot_wider(names_from = VIC_AGE_GROUP, values_from = count)
+
+pivot <- nypd_tidy %>%
+  group_by(VIC_RACE, VIC_SEX, VIC_AGE_GROUP) %>%
+  summarise(count = n())
+```
+
+
+## Visual 2 - Gender Bar Graph
+Bar graph with gender and race of victim breakdown
+```{r}
+ggplot(pivot, aes(x = VIC_RACE, y = count, fill = VIC_SEX)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    scale_y_continuous(limits = c(0, 20000)) +
+    geom_text(aes(label = count), vjust = -1) +
+    labs(title = "Victim Races and Sexes", x = "Victim Race", y = "Count") +
+    facet_wrap(~ VIC_SEX) +	
+    theme(axis.text.x = element_text(angle = 90, vjust=0,  hjust =1 ))+
+    scale_fill_manual(values = c("blue", "pink", "gray"))
+```
+
+## Visual 3 - 3 Variable Bar Graph Breakdown
+Bar graph with Victim: Gender, Race, and Age to see relationships
+
+```{r}
+ggplot(pivot, aes(x = VIC_RACE, y = count, fill = VIC_SEX)) +
+     geom_bar(stat = "identity", position = "dodge") +
+     geom_text(aes(label = count), ,position = position_dodge(width = 0.9), vjust = 0.5) +
+     facet_wrap(~ VIC_AGE_GROUP) +
+     labs(title = "Victim Races, Sexes, and Age Groups", x = "Victim Race", y = "Count") +
+     theme(axis.text.x = element_text(angle = 90, vjust=0,  hjust =1 ))+
+     scale_fill_manual(values = c("blue", "pink", "gray"))
+```
+
+## Analysis
+
+For the first visual (line graph), I wanted to see how many incidents occurred over time, and to see if there were any spikes or dips. As suspected, there was a huge dip starting in 2016 through 2019, but then spikes again in 2020. I believe the spike in 2020 is due to everyone being at home within the pandemic and emotions were running high during that time, with fear being the primary factor of influence. 
+
+For the second and third visuals, I wanted to see if there was a trend between first the two variables of gender and ethnicity to see the data set on a smaller plan, and then expanded it to include the third variable of age. From those two charts, we can conclude that Black Males between the ages of 25-44 are the highest incident victims of crime in NY. Further analysis would need to look at other features such as location/neighborhood and other outside factors not gathered in the dataset. 
+
+
+
+## Model
+Predicts Y coordinate given X coordinate is known
+
+```{r}
+model <- lm(Y_COORD_CD ~ X_COORD_CD, data = nypd_tidy)
+
+pred <- predict(model)
+
+nypd_tidy$predicted <- pred
+
+ggplot(data.frame(actual_X = nypd_tidy$X_COORD_CD, actual_Y =  nypd_tidy$Y_COORD_CD, predicted = pred),
+    aes(x = actual_X, y = actual_Y))+
+    geom_point(aes(x =actual_X, y = actual_Y), color = "blue") +
+    geom_point(aes(x =actual_X, y=pred), color ="red")
+```
+
+The model above appears to predict a linear relationship
+
+## Bias
+Overall, I do not believe there is any bias in myself with this data set as I holistically included all gender, race and age groupings to not focus on one group more than the other. Additionally, the data set itself does not have an inherit bias as it's static data, however, being the data would need to be report, if not reported (which with the missing values this could be the case) it could lead to a bias, with one grouping getting more dataponts because they are reporting more than other groups. 
+
